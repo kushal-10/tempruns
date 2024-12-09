@@ -1,0 +1,63 @@
+name: Update Folder Log with Commit Dates
+
+on:
+  push:
+    paths:
+      # Include all folders under versions and the JSON file itself
+      - versions/**
+      - folder_log.json
+
+jobs:
+  update-json:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Update Folder Log with Commit Dates
+      run: |
+        # Path to the JSON file
+        JSON_FILE="folder_log.json"
+
+        # Load existing JSON data
+        if [ -f "$JSON_FILE" ]; then
+          EXISTING_JSON=$(cat "$JSON_FILE")
+        else
+          echo "Error: JSON file not found."
+          exit 1
+        fi
+
+        # Extract version folder names from JSON
+        VERSION_FOLDERS=$(echo "$EXISTING_JSON" | jq -r '.versions[].version' | sed 's/^/versions\//')
+
+        # Initialize updated JSON
+        UPDATED_JSON=$(echo "$EXISTING_JSON" | jq '.')
+
+        # Iterate through each folder and retrieve commit dates
+        for FOLDER in $VERSION_FOLDERS; do
+          if [ -d "$FOLDER" ]; then
+            # Get first and last commit dates
+            FIRST_COMMIT_DATE=$(git log --reverse --format=%cs -- "$FOLDER" | head -n 1)
+            LAST_COMMIT_DATE=$(git log -1 --format=%cs -- "$FOLDER")
+
+            if [ -n "$FIRST_COMMIT_DATE" ] && [ -n "$LAST_COMMIT_DATE" ]; then
+              VERSION=$(basename "$FOLDER")
+
+              # Update the JSON with commit dates
+              UPDATED_JSON=$(echo "$UPDATED_JSON" | jq --arg version "$VERSION" --arg first "$FIRST_COMMIT_DATE" --arg last "$LAST_COMMIT_DATE" '
+                .versions |= map(if .version == $version then .release_date = $first | .last_updated = $last else . end)
+              ')
+            fi
+          fi
+        done
+
+        # Write the updated JSON back to the file
+        echo "$UPDATED_JSON" > "$JSON_FILE"
+
+        # Commit and push the updated JSON file
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git add "$JSON_FILE"
+        git commit -m "Update folder log with commit dates"
+        git push
